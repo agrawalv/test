@@ -10,7 +10,7 @@ CATEGORIES = [
     "Social Media & Communities",
 ]
 
-SYSTEM_PROMPT = f"""You are an email categorization assistant. Classify each email into exactly one of these 5 categories:
+SYSTEM_PROMPT = """You are an email categorization assistant. Classify each email into exactly one of these 5 categories:
 
 1. Work & Professional - work emails, business communications, job-related, meetings, invoices, professional services
 2. Personal & Family - personal messages, friends, family, personal appointments
@@ -19,20 +19,16 @@ SYSTEM_PROMPT = f"""You are an email categorization assistant. Classify each ema
 5. Social Media & Communities - social networks, forums, community platforms, event invites from social apps
 
 Respond ONLY with a JSON object mapping email IDs to category names. Example:
-{{"id1": "Work & Professional", "id2": "Newsletters & Marketing"}}"""
+{"id1": "Work & Professional", "id2": "Newsletters & Marketing"}"""
 
 
-def categorize_emails(emails: list[dict]) -> dict[str, str]:
-    """
-    Categorize a list of emails using Claude.
-    Returns dict mapping email id -> category name.
-    """
+def categorize_emails(emails: list[dict], api_key: str) -> dict[str, str]:
+    """Categorize emails using Claude. Returns dict mapping email id -> category."""
     if not emails:
         return {}
 
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(api_key=api_key)
 
-    # Build email summaries for the prompt
     email_list = []
     for email in emails:
         email_list.append(
@@ -44,7 +40,6 @@ def categorize_emails(emails: list[dict]) -> dict[str, str]:
 
     user_message = "Categorize these emails:\n\n" + "\n\n---\n\n".join(email_list)
 
-    # Use streaming to handle potentially large responses
     with client.messages.stream(
         model="claude-opus-4-6",
         max_tokens=4096,
@@ -54,24 +49,19 @@ def categorize_emails(emails: list[dict]) -> dict[str, str]:
     ) as stream:
         response = stream.get_final_message()
 
-    # Extract text from response
     text = ""
     for block in response.content:
         if block.type == "text":
             text = block.text
             break
 
-    # Parse JSON from response
-    # Find JSON object in the text
     start = text.find("{")
     end = text.rfind("}") + 1
     if start == -1 or end == 0:
-        # Fallback: assign everything to Notifications
         return {e["id"]: "Notifications & Alerts" for e in emails}
 
     try:
         result = json.loads(text[start:end])
-        # Validate categories
         for email_id, cat in result.items():
             if cat not in CATEGORIES:
                 result[email_id] = "Notifications & Alerts"
@@ -81,7 +71,6 @@ def categorize_emails(emails: list[dict]) -> dict[str, str]:
 
 
 def count_by_category(email_ids: list[str], categorization: dict[str, str]) -> dict[str, int]:
-    """Count emails per category."""
     counts = {cat: 0 for cat in CATEGORIES}
     for email_id in email_ids:
         cat = categorization.get(email_id, "Notifications & Alerts")
