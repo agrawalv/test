@@ -9,6 +9,7 @@ from flask import Flask, session, redirect, request, url_for, jsonify, render_te
 from gmail_auth import build_flow, token_dict_from_credentials
 from gmail_fetcher import fetch_emails
 from categorizer import categorize_emails, count_by_category, CATEGORIES
+from demo_data import get_demo_counts
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
@@ -217,6 +218,17 @@ SETUP_PAGE = """<!DOCTYPE html>
 
     <button type="submit">Connect Gmail →</button>
   </form>
+
+  <div style="text-align:center;margin-top:20px">
+    <span style="color:#a0aec0;font-size:.9rem">Just want to see how it looks?</span><br>
+    <a href="/demo" style="
+      display:inline-block;margin-top:10px;padding:12px 28px;
+      background:#f7fafc;border:1.5px solid #e2e8f0;border-radius:10px;
+      color:#4a5568;font-weight:600;font-size:.95rem;text-decoration:none;
+      transition:background .2s;">
+      ✨ Try the demo (no login needed)
+    </a>
+  </div>
 </div>
 </body>
 </html>"""
@@ -304,6 +316,21 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
   </style>
 </head>
 <body>
+  {% if demo %}
+  <div style="
+    background:linear-gradient(90deg,#667eea,#764ba2);
+    color:white;padding:10px 20px;border-radius:10px;
+    font-size:.9rem;font-weight:500;margin-bottom:20px;
+    display:flex;align-items:center;gap:12px;max-width:1000px;width:100%">
+    ✨ <strong>Demo mode</strong> — showing 50 sample emails. Counts vary slightly each refresh to simulate a live inbox.
+    <span style="flex:1"></span>
+    <a href="/setup" style="color:white;font-weight:600;border:1.5px solid rgba(255,255,255,.6);
+      padding:4px 12px;border-radius:6px;text-decoration:none;white-space:nowrap">
+      Connect real Gmail →
+    </a>
+  </div>
+  {% endif %}
+
   <header>
     <h1>📧 Gmail Categorizer</h1>
     <p>AI-powered inbox categorization · refreshes every minute</p>
@@ -314,7 +341,11 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
     <span id="status-text">Loading…</span>
     <span class="spacer"></span>
     <button class="btn-refresh" onclick="triggerRefresh()">↻ Refresh now</button>
+    {% if not demo %}
     <button class="btn-logout" onclick="location.href='/logout'">Sign out</button>
+    {% else %}
+    <button class="btn-logout" onclick="location.href='/setup'">← Setup</button>
+    {% endif %}
   </div>
 
   <div class="cards" id="cards"></div>
@@ -326,9 +357,12 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
   <div class="timer" id="timer"></div>
 
   <script>
-    const ICONS = ["💼","👨‍👩‍👧","📰","🔔","📱"];
-    const CATS  = {{ categories | tojson }};
-    let nextAt  = Date.now() + 60000;
+    const ICONS   = ["💼","👨‍👩‍👧","📰","🔔","📱"];
+    const CATS    = {{ categories | tojson }};
+    const IS_DEMO = {{ 'true' if demo else 'false' }};
+    const STATUS_URL  = IS_DEMO ? "/demo/api/status"  : "/api/status";
+    const REFRESH_URL = IS_DEMO ? "/demo/api/refresh" : "/api/refresh";
+    let nextAt = Date.now() + 60000;
 
     function renderCards(counts, total) {
       const c = document.getElementById("cards");
@@ -348,7 +382,7 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
     }
 
     async function fetchStatus() {
-      const r = await fetch("/api/status");
+      const r = await fetch(STATUS_URL);
       const d = await r.json();
       const dot = document.getElementById("dot");
       const st  = document.getElementById("status-text");
@@ -375,7 +409,7 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
     }
 
     async function triggerRefresh() {
-      await fetch("/api/refresh", { method: "POST" });
+      await fetch(REFRESH_URL, { method: "POST" });
       nextAt = Date.now() + 60000;
       fetchStatus();
     }
@@ -407,7 +441,6 @@ def index():
     sid = session_id()
     state = get_state(sid)
     if state["status"] == "idle":
-        # Kick off first refresh
         token_dict = session["token_dict"]
         api_key = session["anthropic_key"]
         threading.Thread(
@@ -415,7 +448,25 @@ def index():
             args=(sid, token_dict, api_key),
             daemon=True,
         ).start()
-    return render_template_string(DASHBOARD_PAGE, categories=CATEGORIES)
+    return render_template_string(DASHBOARD_PAGE, categories=CATEGORIES, demo=False)
+
+
+# ─── Demo routes ──────────────────────────────────────────────────────────────
+
+@app.route("/demo")
+def demo():
+    """Demo dashboard — no credentials required, uses sample data."""
+    return render_template_string(DASHBOARD_PAGE, categories=CATEGORIES, demo=True)
+
+
+@app.route("/demo/api/status")
+def demo_api_status():
+    return jsonify(get_demo_counts())
+
+
+@app.route("/demo/api/refresh", methods=["POST"])
+def demo_api_refresh():
+    return jsonify(get_demo_counts())
 
 
 @app.route("/setup", methods=["GET", "POST"])
