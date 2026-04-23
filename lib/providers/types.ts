@@ -46,6 +46,7 @@ export type PriceReaction = {
   priceBefore: number | null;
   priceAfter: number | null;
   priceChangePct: number | null;
+  source?: "stooq" | "yahoo";
 };
 
 export interface Provider {

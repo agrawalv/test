@@ -70,7 +70,11 @@ export async function yahooPriceReaction(
       interval: "1d",
     });
     const quotes = (result.quotes ?? []) as DailyQuote[];
-    return pickPriceReaction(quotes, reportDate, reportTime);
+    const reaction = pickPriceReaction(quotes, reportDate, reportTime);
+    if (reaction.priceBefore != null || reaction.priceAfter != null) {
+      return { ...reaction, source: "yahoo" };
+    }
+    return reaction;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     // "No data found, symbol may be delisted" is genuine upstream truth for

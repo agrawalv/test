@@ -1,5 +1,5 @@
 import type { PriceReaction, Provider, RawEarnings, ReportTime } from "./types";
-import { yahooPriceReaction } from "./yahoo-price";
+import { getPriceReactionBlended } from "./price-reaction";
 
 const BASE = "https://finnhub.io/api/v1";
 
@@ -72,10 +72,11 @@ export function createFinnhubProvider(): Provider {
       });
     },
 
-    // Finnhub's /stock/candle is premium-only on free tier. Yahoo's public
-    // chart endpoint is used instead via yahoo-finance2 (handles crumb).
+    // Finnhub's /stock/candle is premium-only on free tier. Stooq's keyless
+    // CSV endpoint is primary; Yahoo (via yahoo-finance2 which handles the
+    // crumb) is a fallback for tickers Stooq doesn't cover.
     async getPriceReaction(symbol, reportDate, reportTime): Promise<PriceReaction> {
-      return yahooPriceReaction(symbol, reportDate, reportTime);
+      return getPriceReactionBlended(symbol, reportDate, reportTime);
     },
   };
 }

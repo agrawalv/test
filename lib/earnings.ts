@@ -84,12 +84,13 @@ async function enrich(
   raw: RawEarnings[],
   date: string,
   provider: Provider,
-): Promise<EarningsRow[]> {
+): Promise<{ rows: EarningsRow[]; priceSources: Set<string> }> {
   const today = todayIso();
   const isPast = date < today;
 
   const batchSize = 10;
   const out: EarningsRow[] = [];
+  const priceSources = new Set<string>();
 
   for (let i = 0; i < raw.length; i += batchSize) {
     const batch = raw.slice(i, i + batchSize);
@@ -107,6 +108,7 @@ async function enrich(
           priceBefore = reaction.priceBefore;
           priceAfter = reaction.priceAfter;
           priceChangePct = reaction.priceChangePct;
+          if (reaction.source) priceSources.add(reaction.source);
         }
 
         const s = computeSuggestion({
@@ -156,7 +158,7 @@ async function enrich(
     if (am == null && bm != null) return 1;
     return a.symbol.localeCompare(b.symbol);
   });
-  return out;
+  return { rows: out, priceSources };
 }
 
 export async function getEarningsForDate(date: string): Promise<EarningsFetchResult> {
@@ -199,14 +201,14 @@ export async function getEarningsForDate(date: string): Promise<EarningsFetchRes
     raw = yahooResult.rows;
     const yahooHelped = yahooResult.contributed;
 
-    const enriched = await enrich(raw, date, provider);
+    const { rows, priceSources } = await enrich(raw, date, provider);
 
-    // Tag yahoo as a source only when it actually contributed — either a
-    // profile field got filled, or at least one past-date price came back.
-    const yahooPricesLanded = enriched.some((r) => r.priceBefore != null || r.priceAfter != null);
-    if (yahooHelped || yahooPricesLanded) sources.push("yahoo");
+    // Tag sources only when they actually contributed. Yahoo gets listed
+    // either when the profile enricher filled a cell or when its price
+    // fallback landed data; Stooq is listed when its CSV returned a close.
+    for (const s of priceSources) sources.push(s);
+    if (yahooHelped && !sources.includes("yahoo")) sources.push("yahoo");
 
-    const rows = enriched;
     const fetchedAt = await writeCache(cacheKey, { rows, sources });
     return {
       date,
