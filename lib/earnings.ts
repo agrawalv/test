@@ -8,11 +8,76 @@ export type EarningsFetchResult = {
   rows: EarningsRow[];
   fetchedAt: number;
   provider: string;
+  sources: string[];
   fromCache: boolean;
   stale: boolean;
 };
 
-async function enrich(raw: RawEarnings[], date: string, provider: Provider): Promise<EarningsRow[]> {
+// Merge two calendar lists by symbol. Primary wins on any non-null field;
+// secondary fills in whatever's missing.
+function mergeCalendars(primary: RawEarnings[], secondary: RawEarnings[]): RawEarnings[] {
+  const bySymbol = new Map<string, RawEarnings>();
+  for (const r of secondary) bySymbol.set(r.symbol, r);
+
+  const seen = new Set<string>();
+  const out: RawEarnings[] = [];
+  for (const p of primary) {
+    seen.add(p.symbol);
+    const s = bySymbol.get(p.symbol);
+    if (!s) {
+      out.push(p);
+      continue;
+    }
+    out.push({
+      ...p,
+      companyName:
+        p.companyName && p.companyName !== p.symbol
+          ? p.companyName
+          : (s.companyName && s.companyName !== s.symbol ? s.companyName : p.companyName),
+      fiscalPeriod: p.fiscalPeriod || s.fiscalPeriod,
+      reportTime: p.reportTime !== "UNKNOWN" ? p.reportTime : s.reportTime,
+      marketCap: p.marketCap ?? s.marketCap,
+      epsEstimate: p.epsEstimate ?? s.epsEstimate,
+      revenueEstimate: p.revenueEstimate ?? s.revenueEstimate,
+      epsActual: p.epsActual ?? s.epsActual,
+      revenueActual: p.revenueActual ?? s.revenueActual,
+    });
+  }
+  // Secondary-only symbols are ignored — primary defines "who reports today".
+  // If you'd rather union, uncomment:
+  // for (const s of secondary) if (!seen.has(s.symbol)) out.push(s);
+  return out;
+}
+
+async function enrichYahooProfiles(rows: RawEarnings[]): Promise<RawEarnings[]> {
+  const need = rows.filter((r) => r.marketCap == null || r.companyName === r.symbol);
+  if (need.length === 0) return rows;
+  try {
+    const { yahooQuoteInfo } = await import("./providers/yahoo-quote");
+    const info = await yahooQuoteInfo(need.map((r) => r.symbol));
+    if (info.size === 0) return rows;
+    return rows.map((r) => {
+      const y = info.get(r.symbol);
+      if (!y) return r;
+      return {
+        ...r,
+        companyName:
+          r.companyName && r.companyName !== r.symbol
+            ? r.companyName
+            : (y.name ?? r.companyName),
+        marketCap: r.marketCap ?? y.marketCap ?? null,
+      };
+    });
+  } catch {
+    return rows;
+  }
+}
+
+async function enrich(
+  raw: RawEarnings[],
+  date: string,
+  provider: Provider,
+): Promise<EarningsRow[]> {
   const today = todayIso();
   const isPast = date < today;
 
@@ -88,34 +153,68 @@ async function enrich(raw: RawEarnings[], date: string, provider: Provider): Pro
 }
 
 export async function getEarningsForDate(date: string): Promise<EarningsFetchResult> {
-  const { getProvider } = await import("./providers");
+  const { getProvider, getSecondaryProvider } = await import("./providers");
   const provider = getProvider();
-  const cacheKey = `earnings_${provider.name}_${date}`;
+  const secondary = getSecondaryProvider();
+  const cacheKey = `earnings_${provider.name}${secondary ? `_${secondary.name}` : ""}_${date}`;
 
-  const cached = (await readCache<EarningsRow[]>(cacheKey, date)) as CacheResult<EarningsRow[]> | null;
+  const cached = (await readCache<{
+    rows: EarningsRow[];
+    sources: string[];
+  }>(cacheKey, date)) as CacheResult<{ rows: EarningsRow[]; sources: string[] }> | null;
   if (cached && !cached.stale) {
     return {
       date,
-      rows: cached.data,
+      rows: cached.data.rows,
       fetchedAt: cached.fetchedAt,
       provider: provider.name,
+      sources: cached.data.sources ?? [provider.name],
       fromCache: true,
       stale: false,
     };
   }
 
   try {
-    const raw = await provider.getEarningsForDate(date);
+    const sources: string[] = [provider.name];
+    let raw = await provider.getEarningsForDate(date);
+
+    if (secondary) {
+      try {
+        const supplement = await secondary.getEarningsForDate(date);
+        raw = mergeCalendars(raw, supplement);
+        sources.push(secondary.name);
+      } catch {
+        // secondary is optional — don't fail the request if it errors
+      }
+    }
+
+    const beforeYahoo = raw.some((r) => r.marketCap == null || r.companyName === r.symbol);
+    raw = await enrichYahooProfiles(raw);
+    const afterYahoo = raw.some((r) => r.marketCap != null);
+    if (beforeYahoo && afterYahoo) sources.push("yahoo");
+
+    // Price source is always Yahoo for past dates; tag it.
+    if (date < todayIso() && !sources.includes("yahoo")) sources.push("yahoo");
+
     const rows = await enrich(raw, date, provider);
-    const fetchedAt = await writeCache(cacheKey, rows);
-    return { date, rows, fetchedAt, provider: provider.name, fromCache: false, stale: false };
+    const fetchedAt = await writeCache(cacheKey, { rows, sources });
+    return {
+      date,
+      rows,
+      fetchedAt,
+      provider: provider.name,
+      sources,
+      fromCache: false,
+      stale: false,
+    };
   } catch (err) {
     if (cached) {
       return {
         date,
-        rows: cached.data,
+        rows: cached.data.rows,
         fetchedAt: cached.fetchedAt,
         provider: provider.name,
+        sources: cached.data.sources ?? [provider.name],
         fromCache: true,
         stale: true,
       };

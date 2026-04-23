@@ -24,7 +24,8 @@ export default async function Page({ searchParams }: PageProps) {
 
   try {
     const result = await getEarningsForDate(date);
-    updatedLabel = `Updated ${formatRelativeTime(result.fetchedAt)} · ${result.provider}${result.stale ? " (stale)" : ""}`;
+    const sourceLabel = result.sources.length > 0 ? result.sources.join(" + ") : result.provider;
+    updatedLabel = `Updated ${formatRelativeTime(result.fetchedAt)} · ${sourceLabel}${result.stale ? " (stale)" : ""}`;
     body = <EarningsTable rows={result.rows} />;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
