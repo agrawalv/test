@@ -9,6 +9,8 @@ export type EarningsRow = {
   reportTime: ReportTime;
   fiscalPeriod: string;
 
+  marketCap: number | null;
+
   epsEstimate: number | null;
   revenueEstimate: number | null;
 

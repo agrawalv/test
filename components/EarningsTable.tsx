@@ -11,6 +11,7 @@ type SortKey =
   | "symbol"
   | "companyName"
   | "reportTime"
+  | "marketCap"
   | "epsEstimate"
   | "epsActual"
   | "epsSurprisePct"
@@ -28,6 +29,7 @@ const COLS: { key: SortKey; label: string; align?: "right" | "left" }[] = [
   { key: "symbol", label: "Symbol" },
   { key: "companyName", label: "Company" },
   { key: "reportTime", label: "When" },
+  { key: "marketCap", label: "Mkt Cap", align: "right" },
   { key: "epsEstimate", label: "EPS Est.", align: "right" },
   { key: "epsActual", label: "EPS Actual", align: "right" },
   { key: "epsSurprisePct", label: "EPS Surp.", align: "right" },
@@ -40,6 +42,13 @@ const COLS: { key: SortKey; label: string; align?: "right" | "left" }[] = [
   { key: "suggestion", label: "Suggestion" },
 ];
 
+const DESC_DEFAULT_KEYS: SortKey[] = [
+  "marketCap",
+  "priceChangePct",
+  "epsSurprisePct",
+  "revenueSurprisePct",
+];
+
 function cmp(a: unknown, b: unknown): number {
   if (a == null && b == null) return 0;
   if (a == null) return 1;
@@ -49,8 +58,8 @@ function cmp(a: unknown, b: unknown): number {
 }
 
 export function EarningsTable({ rows }: { rows: EarningsRow[] }) {
-  const [sortKey, setSortKey] = useState<SortKey>("symbol");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [sortKey, setSortKey] = useState<SortKey>("marketCap");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
@@ -76,7 +85,7 @@ export function EarningsTable({ rows }: { rows: EarningsRow[] }) {
     if (key === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
       setSortKey(key);
-      setSortDir(key === "priceChangePct" || key === "epsSurprisePct" ? "desc" : "asc");
+      setSortDir(DESC_DEFAULT_KEYS.includes(key) ? "desc" : "asc");
     }
   }
 
@@ -86,6 +95,7 @@ export function EarningsTable({ rows }: { rows: EarningsRow[] }) {
       "Company",
       "When",
       "Fiscal",
+      "Market Cap",
       "EPS Est",
       "EPS Actual",
       "EPS Surprise %",
@@ -107,6 +117,7 @@ export function EarningsTable({ rows }: { rows: EarningsRow[] }) {
           r.companyName,
           r.reportTime,
           r.fiscalPeriod,
+          r.marketCap ?? "",
           r.epsEstimate ?? "",
           r.epsActual ?? "",
           r.epsSurprisePct ?? "",
@@ -197,6 +208,9 @@ export function EarningsTable({ rows }: { rows: EarningsRow[] }) {
                     </td>
                     <td className="whitespace-nowrap px-3 py-1.5">
                       <WhenBadge time={r.reportTime} />
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-1.5 text-right font-mono">
+                      {formatCompactUSD(r.marketCap)}
                     </td>
                     <td className="whitespace-nowrap px-3 py-1.5 text-right font-mono">
                       {formatNum(r.epsEstimate, 2)}

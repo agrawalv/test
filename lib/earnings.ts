@@ -30,7 +30,7 @@ async function enrich(raw: RawEarnings[], date: string, provider: Provider): Pro
         let priceAfter: number | null = null;
         let priceChangePct: number | null = null;
 
-        if (isPast && (r.epsActual != null || r.revenueActual != null)) {
+        if (isPast) {
           const reaction = await provider.getPriceReaction(r.symbol, r.reportDate, r.reportTime);
           priceBefore = reaction.priceBefore;
           priceAfter = reaction.priceAfter;
@@ -53,6 +53,7 @@ async function enrich(raw: RawEarnings[], date: string, provider: Provider): Pro
           reportDate: r.reportDate,
           reportTime: r.reportTime,
           fiscalPeriod: r.fiscalPeriod,
+          marketCap: r.marketCap,
           epsEstimate: r.epsEstimate,
           revenueEstimate: r.revenueEstimate,
           epsActual: r.epsActual,
@@ -75,7 +76,14 @@ async function enrich(raw: RawEarnings[], date: string, provider: Provider): Pro
     }
   }
 
-  out.sort((a, b) => a.symbol.localeCompare(b.symbol));
+  out.sort((a, b) => {
+    const am = a.marketCap;
+    const bm = b.marketCap;
+    if (am != null && bm != null && am !== bm) return bm - am;
+    if (am != null && bm == null) return -1;
+    if (am == null && bm != null) return 1;
+    return a.symbol.localeCompare(b.symbol);
+  });
   return out;
 }
 

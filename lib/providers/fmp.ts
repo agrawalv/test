@@ -63,6 +63,7 @@ export function createFmpProvider(): Provider {
         reportDate: e.date,
         reportTime: mapHour(e.time),
         fiscalPeriod: fiscalPeriodFromDate(e.date),
+        marketCap: null,
         epsEstimate: e.epsEstimated,
         revenueEstimate: e.revenueEstimated,
         epsActual: e.eps,
