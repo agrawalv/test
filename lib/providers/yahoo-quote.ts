@@ -1,4 +1,4 @@
-import { getYahoo } from "./yahoo-client";
+import { getYahoo, isYahooQueryable } from "./yahoo-client";
 
 export type YahooProfile = { name?: string; marketCap?: number };
 
@@ -8,12 +8,13 @@ export type YahooProfile = { name?: string; marketCap?: number };
 // and to stay within Yahoo's per-URL length ceiling.
 export async function yahooQuoteInfo(symbols: string[]): Promise<Map<string, YahooProfile>> {
   const out = new Map<string, YahooProfile>();
-  if (symbols.length === 0) return out;
+  const queryable = symbols.filter(isYahooQueryable);
+  if (queryable.length === 0) return out;
 
   const chunkSize = 40;
   const chunks: string[][] = [];
-  for (let i = 0; i < symbols.length; i += chunkSize) {
-    chunks.push(symbols.slice(i, i + chunkSize));
+  for (let i = 0; i < queryable.length; i += chunkSize) {
+    chunks.push(queryable.slice(i, i + chunkSize));
   }
 
   for (const chunk of chunks) {

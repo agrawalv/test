@@ -1,6 +1,6 @@
 import { addDays, isoDate, nextTradingDay, previousTradingDay } from "../date";
 import type { PriceReaction, ReportTime } from "./types";
-import { getYahoo } from "./yahoo-client";
+import { getYahoo, isYahooQueryable } from "./yahoo-client";
 
 type DailyQuote = { date: Date | null | undefined; close: number | null | undefined };
 
@@ -54,6 +54,9 @@ export async function yahooPriceReaction(
   reportDate: string,
   reportTime: ReportTime,
 ): Promise<PriceReaction> {
+  if (!isYahooQueryable(symbol)) {
+    return { priceBefore: null, priceAfter: null, priceChangePct: null };
+  }
   const beforeDate = reportTime === "BMO" ? previousTradingDay(reportDate) : reportDate;
   const afterDate = reportTime === "BMO" ? reportDate : nextTradingDay(reportDate);
 
@@ -70,7 +73,13 @@ export async function yahooPriceReaction(
     return pickPriceReaction(quotes, reportDate, reportTime);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[yahoo-price] ${symbol} ${reportDate}: ${msg}`);
+    // "No data found, symbol may be delisted" is genuine upstream truth for
+    // acquired/delisted tickers — demote to a single-line info, not a warn.
+    if (msg.includes("No data found")) {
+      console.info(`[yahoo-price] ${symbol}: delisted or no data`);
+    } else {
+      console.warn(`[yahoo-price] ${symbol} ${reportDate}: ${msg}`);
+    }
     return { priceBefore: null, priceAfter: null, priceChangePct: null };
   }
 }
