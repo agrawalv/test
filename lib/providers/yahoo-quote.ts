@@ -1,46 +1,38 @@
-// Anonymous Yahoo Finance quote lookup for profile fields (market cap + name).
-//
-// The v7/finance/quote endpoint became crumb-gated in 2024 for most clients, so
-// we treat this as best-effort: success fills gaps, any failure is swallowed
-// and the caller just keeps whatever it had.
+import { getYahoo } from "./yahoo-client";
 
 export type YahooProfile = { name?: string; marketCap?: number };
 
-type YahooQuoteResponse = {
-  quoteResponse?: {
-    result?: Array<{
-      symbol: string;
-      longName?: string;
-      shortName?: string;
-      marketCap?: number;
-    }>;
-  };
-};
-
-const UA =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
-
+// Batch fetch via yahoo-finance2. Internally the package handles the crumb +
+// cookie dance that the raw v7/quote endpoint now requires. We still split
+// into smaller chunks so a single bad symbol doesn't poison the whole batch
+// and to stay within Yahoo's per-URL length ceiling.
 export async function yahooQuoteInfo(symbols: string[]): Promise<Map<string, YahooProfile>> {
   const out = new Map<string, YahooProfile>();
   if (symbols.length === 0) return out;
 
-  const batches: string[][] = [];
-  for (let i = 0; i < symbols.length; i += 50) batches.push(symbols.slice(i, i + 50));
+  const chunkSize = 40;
+  const chunks: string[][] = [];
+  for (let i = 0; i < symbols.length; i += chunkSize) {
+    chunks.push(symbols.slice(i, i + chunkSize));
+  }
 
-  for (const batch of batches) {
+  for (const chunk of chunks) {
     try {
-      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(batch.join(","))}`;
-      const res = await fetch(url, { cache: "no-store", headers: { "User-Agent": UA } });
-      if (!res.ok) continue;
-      const data = (await res.json()) as YahooQuoteResponse;
-      for (const r of data.quoteResponse?.result ?? []) {
+      const results = await getYahoo().quote(chunk, {}, { validateResult: false });
+      const arr = Array.isArray(results) ? results : [results];
+      for (const r of arr) {
+        if (!r?.symbol) continue;
         out.set(r.symbol, {
           name: r.longName ?? r.shortName,
-          marketCap: typeof r.marketCap === "number" && r.marketCap > 0 ? r.marketCap : undefined,
+          marketCap:
+            typeof r.marketCap === "number" && r.marketCap > 0
+              ? r.marketCap
+              : undefined,
         });
       }
-    } catch {
-      // best-effort; ignore and continue with next batch
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[yahoo-quote] batch of ${chunk.length} failed: ${msg}`);
     }
   }
 

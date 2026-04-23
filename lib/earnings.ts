@@ -49,27 +49,34 @@ function mergeCalendars(primary: RawEarnings[], secondary: RawEarnings[]): RawEa
   return out;
 }
 
-async function enrichYahooProfiles(rows: RawEarnings[]): Promise<RawEarnings[]> {
+async function enrichYahooProfiles(
+  rows: RawEarnings[],
+): Promise<{ rows: RawEarnings[]; contributed: boolean }> {
   const need = rows.filter((r) => r.marketCap == null || r.companyName === r.symbol);
-  if (need.length === 0) return rows;
+  if (need.length === 0) return { rows, contributed: false };
   try {
     const { yahooQuoteInfo } = await import("./providers/yahoo-quote");
     const info = await yahooQuoteInfo(need.map((r) => r.symbol));
-    if (info.size === 0) return rows;
-    return rows.map((r) => {
+    if (info.size === 0) return { rows, contributed: false };
+    let contributed = false;
+    const merged = rows.map((r) => {
       const y = info.get(r.symbol);
       if (!y) return r;
-      return {
-        ...r,
-        companyName:
-          r.companyName && r.companyName !== r.symbol
-            ? r.companyName
-            : (y.name ?? r.companyName),
-        marketCap: r.marketCap ?? y.marketCap ?? null,
-      };
+      const nextName =
+        r.companyName && r.companyName !== r.symbol
+          ? r.companyName
+          : (y.name ?? r.companyName);
+      const nextMarketCap = r.marketCap ?? y.marketCap ?? null;
+      if (nextName !== r.companyName || nextMarketCap !== r.marketCap) {
+        contributed = true;
+      }
+      return { ...r, companyName: nextName, marketCap: nextMarketCap };
     });
-  } catch {
-    return rows;
+    return { rows: merged, contributed };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[yahoo-quote] enrichment failed: ${msg}`);
+    return { rows, contributed: false };
   }
 }
 
@@ -188,15 +195,18 @@ export async function getEarningsForDate(date: string): Promise<EarningsFetchRes
       }
     }
 
-    const beforeYahoo = raw.some((r) => r.marketCap == null || r.companyName === r.symbol);
-    raw = await enrichYahooProfiles(raw);
-    const afterYahoo = raw.some((r) => r.marketCap != null);
-    if (beforeYahoo && afterYahoo) sources.push("yahoo");
+    const yahooResult = await enrichYahooProfiles(raw);
+    raw = yahooResult.rows;
+    const yahooHelped = yahooResult.contributed;
 
-    // Price source is always Yahoo for past dates; tag it.
-    if (date < todayIso() && !sources.includes("yahoo")) sources.push("yahoo");
+    const enriched = await enrich(raw, date, provider);
 
-    const rows = await enrich(raw, date, provider);
+    // Tag yahoo as a source only when it actually contributed — either a
+    // profile field got filled, or at least one past-date price came back.
+    const yahooPricesLanded = enriched.some((r) => r.priceBefore != null || r.priceAfter != null);
+    if (yahooHelped || yahooPricesLanded) sources.push("yahoo");
+
+    const rows = enriched;
     const fetchedAt = await writeCache(cacheKey, { rows, sources });
     return {
       date,
