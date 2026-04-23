@@ -75,7 +75,13 @@ export function EarningsTable({ rows }: { rows: EarningsRow[] }) {
   const sorted = useMemo(() => {
     const out = [...filtered];
     out.sort((a, b) => {
-      const v = cmp(a[sortKey], b[sortKey]);
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      // Nulls always sink, even in desc — otherwise desc flips them to the top.
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      const v = cmp(av, bv);
       return sortDir === "asc" ? v : -v;
     });
     return out;
